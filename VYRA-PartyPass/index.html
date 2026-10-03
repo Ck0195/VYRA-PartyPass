@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VYRA PartyPass</title>
+<style>
+:root{--bg:#07070a;--card:#111116;--line:#26262f;--gold:#d9b46a;--tx:#f3f1ec;--mut:#8b8a93}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 500px at 50% -10%,#1d1630,transparent),var(--bg);color:var(--tx);font-family:Inter,system-ui,sans-serif;min-height:100vh}
+.wrap{max-width:560px;margin:0 auto;padding:28px 18px 60px}
+header{text-align:center;margin-bottom:26px}
+h1{font-size:44px;letter-spacing:.35em;margin:0 0 0 .35em;font-weight:300}
+.tag{color:var(--gold);letter-spacing:.3em;font-size:12px;text-transform:uppercase;margin-top:6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px}
+label{display:block;font-size:11px;letter-spacing:.2em;color:var(--mut);text-transform:uppercase;margin:14px 0 8px}
+input,select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:#0b0b0f;color:var(--tx);font-size:16px}
+button{cursor:pointer;font:inherit;letter-spacing:.2em;text-transform:uppercase;font-size:13px;border-radius:12px;padding:15px;border:0}
+.primary{width:100%;margin-top:20px;background:linear-gradient(135deg,#e8c982,#b8924a);color:#16120a;font-weight:700}
+.primary:disabled{opacity:.5}
+.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.row{display:flex;gap:10px;margin-top:14px}.row button{flex:1}
+#err{color:#ff6b6b;margin-top:12px;font-size:14px;min-height:18px}
+#out{display:none;margin-top:26px;text-align:center}
+canvas{width:100%;max-width:380px;border-radius:14px;border:1px solid var(--line);box-shadow:0 20px 60px #000a}
+.scan{margin-top:28px;text-align:center}.scan small{display:block;color:var(--mut);margin-bottom:10px;font-size:13px}
+.scan button{width:100%}
+</style></head><body><div class="wrap">
+<header><h1>VYRA</h1><div class="tag">Beyond the ordinary</div></header>
+<div class="card">
+  <label for="name">Guest Name</label>
+  <input id="name" maxlength="60" placeholder="Full name" autocomplete="off">
+  <label for="type">Pass Type</label>
+  <select id="type"><option>Regular</option><option>Early Bird</option><option>Couple</option><option>Surge Pass</option></select>
+  <button class="primary" id="gen">Generate Pass</button>
+  <div id="err"></div>
+</div>
+<div id="out">
+  <canvas id="cv" width="1000" height="1500"></canvas>
+  <div class="row"><button class="ghost" id="dl">Download PNG</button><button class="ghost" id="pr">Print</button></div>
+</div>
+<div class="scan"><small>Already have a pass? Open Scanner</small><button class="ghost" id="openScan">Open Scanner</button></div>
+</div>
+<script>
+const SCANNER_URL = "PASTE_SCANNER_WEBSITE_URL_HERE";
+const API_URL = "https://script.google.com/macros/s/AKfycbxlk_WisRENOqbdwxabb--s0T0C7iuQkd2Wi341KaGKy3pkhx0EoXi25gApAhsM3VvE/exec";
+
+const $ = id => document.getElementById(id);
+let lastPass = null;
+
+$("openScan").onclick = () => window.open(SCANNER_URL, "_blank");
+
+function loadImg(src){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src;});}
+
+async function drawTicket(d){
+  const c=$("cv"),x=c.getContext("2d"),W=c.width,H=c.height;
+  x.fillStyle="#0a0a0f";x.fillRect(0,0,W,H);
+  if(d.background){
+    try{const bg=await loadImg(d.background);const s=Math.max(W/bg.width,H/bg.height);
+      x.drawImage(bg,(W-bg.width*s)/2,(H-bg.height*s)/2,bg.width*s,bg.height*s);}catch(e){}
+  }
+  let g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,"rgba(0,0,0,.55)");g.addColorStop(.4,"rgba(0,0,0,.15)");g.addColorStop(.62,"rgba(5,5,8,.92)");g.addColorStop(1,"rgba(5,5,8,.98)");
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  x.strokeStyle="#d9b46a";x.lineWidth=3;x.strokeRect(30,30,W-60,H-60);
+  x.textAlign="center";x.fillStyle="#f3f1ec";
+  x.font="300 120px Georgia,serif";x.fillText("V Y R A",W/2,170);
+  x.fillStyle="#d9b46a";x.font="26px sans-serif";x.fillText("BEYOND THE ORDINARY",W/2,225);
+  x.fillStyle="#8b8a93";x.font="24px sans-serif";x.fillText("GUEST",W/2,830);
+  x.fillStyle="#f3f1ec";x.font="600 64px sans-serif";
+  let n=d.guest_name.toUpperCase(),fs=64;while(x.measureText(n).width>W-160&&fs>26){fs-=2;x.font="600 "+fs+"px sans-serif";}
+  x.fillText(n,W/2,905);
+  x.fillStyle="#d9b46a";x.font="600 36px sans-serif";x.fillText(d.pass_type.toUpperCase(),W/2,965);
+  const q=await loadImg(d.qr),S=330,qx=(W-S)/2,qy=1010;
+  x.fillStyle="#fff";x.fillRect(qx-18,qy-18,S+36,S+36);x.drawImage(q,qx,qy,S,S);
+  x.fillStyle="#f3f1ec";x.font="34px monospace";x.fillText(d.pass_id,W/2,1420);
+}
+
+$("gen").onclick = async () => {
+  const name=$("name").value.trim(), type=$("type").value;
+  $("err").textContent="";
+  if(!name){$("err").textContent="Enter the guest name.";return;}
+  $("gen").disabled=true;$("gen").textContent="Generating…";
+  try{
+    const u=API_URL+"?action=generate&name="+encodeURIComponent(name)+"&type="+encodeURIComponent(type);
+    const r=await fetch(u);const d=await r.json();
+    if(!d.ok) throw new Error(d.message||"Failed");
+    lastPass=d;await drawTicket(d);$("out").style.display="block";
+    $("out").scrollIntoView({behavior:"smooth"});
+  }catch(e){$("err").textContent="Error: "+e.message;}
+  $("gen").disabled=false;$("gen").textContent="Generate Pass";
+};
+$("dl").onclick=()=>{if(!lastPass)return;const a=document.createElement("a");a.href=$("cv").toDataURL("image/png");a.download=lastPass.pass_id+".png";a.click();};
+$("pr").onclick=()=>{if(!lastPass)return;const w=window.open("");w.document.write('<img src="'+$("cv").toDataURL("image/png")+'" style="width:100%;max-width:520px" onload="print()">');w.document.close();};
+</script></body></html>

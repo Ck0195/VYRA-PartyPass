@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VYRA Scanner</title>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<style>
+:root{--bg:#07070a;--card:#111116;--line:#26262f;--gold:#d9b46a;--tx:#f3f1ec;--mut:#8b8a93}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 500px at 50% -10%,#1d1630,transparent),var(--bg);color:var(--tx);font-family:Inter,system-ui,sans-serif;min-height:100vh}
+.wrap{max-width:480px;margin:0 auto;padding:24px 16px 50px}
+header{text-align:center;margin-bottom:18px}
+h1{font-size:40px;letter-spacing:.35em;margin:0 0 0 .35em;font-weight:300}
+.tag{color:var(--gold);letter-spacing:.3em;font-size:12px;text-transform:uppercase;margin-top:6px}
+#reader{border-radius:18px;overflow:hidden;border:1px solid var(--line);background:#000}
+#reader video{object-fit:cover}
+#res{display:none;margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;text-align:center}
+#status{font-size:24px;font-weight:700;letter-spacing:.12em}
+.valid #status,.approved #status{color:#4ade80}.already #status{color:#fbbf24}.invalid #status,.error #status{color:#ff6b6b}
+#msg{color:var(--mut);margin:6px 0 16px;font-size:14px}
+.f{margin:10px 0}.f span{display:block;font-size:11px;letter-spacing:.2em;color:var(--mut);text-transform:uppercase}
+.f b{font-size:20px;font-weight:600;word-break:break-all}
+button{cursor:pointer;font:inherit;letter-spacing:.2em;text-transform:uppercase;font-size:13px;border-radius:12px;padding:15px;border:0;width:100%;margin-top:12px}
+#approve{background:linear-gradient(135deg,#e8c982,#b8924a);color:#16120a;font-weight:700;display:none}
+#again{background:transparent;border:1px solid var(--line);color:var(--tx)}
+</style></head><body><div class="wrap">
+<header><h1>VYRA</h1><div class="tag">Beyond the ordinary</div></header>
+<div id="reader"></div>
+<div id="res">
+  <div id="status"></div><div id="msg"></div>
+  <div id="info">
+    <div class="f"><span>Guest Name</span><b id="gn"></b></div>
+    <div class="f"><span>Pass ID</span><b id="pid"></b></div>
+    <div class="f"><span>Pass Type</span><b id="pt"></b></div>
+  </div>
+  <button id="approve">Approve Entry</button>
+  <button id="again">Scan Again</button>
+</div>
+</div>
+<script>
+const API_URL = "https://script.google.com/macros/s/AKfycbxlk_WisRENOqbdwxabb--s0T0C7iuQkd2Wi341KaGKy3pkhx0EoXi25gApAhsM3VvE/exec";
+const $ = id => document.getElementById(id);
+const LABEL = {valid:"VALID PASS",already:"ALREADY USED",invalid:"INVALID PASS",approved:"ENTRY APPROVED",error:"ERROR"};
+let scanner, busy = false, current = null;
+
+function normId(t){let s=String(t||"").trim().toUpperCase();if(!s)return "";return "PASS-"+s.replace(/^(PASS-)+/,"");}
+
+function show(d){
+  current=d;const r=d.result||"error";
+  $("res").style.display="block";$("res").className=r;
+  $("status").textContent=LABEL[r]||"ERROR";$("msg").textContent=d.message||"";
+  $("info").style.display=(d.pass_id||d.guest_name)?"block":"none";
+  $("gn").textContent=d.guest_name||"—";$("pid").textContent=d.pass_id||"—";$("pt").textContent=d.pass_type||"—";
+  $("approve").style.display=r==="valid"?"block":"none";
+  $("approve").disabled=false;
+}
+async function call(action,id){
+  const r=await fetch(API_URL+"?action="+action+"&pass_id="+encodeURIComponent(id));
+  return r.json();
+}
+async function onScan(text){
+  if(busy)return;busy=true;
+  try{await scanner.pause(true);}catch(e){}
+  const id=normId(text);
+  $("res").style.display="block";$("res").className="";$("status").textContent="CHECKING…";$("msg").textContent="";$("info").style.display="none";$("approve").style.display="none";
+  try{show(await call("check",id));}catch(e){show({result:"error",message:"Network error. Try again."});}
+}
+$("approve").onclick=async()=>{
+  if(!current||current.result!=="valid")return;
+  $("approve").disabled=true;
+  try{show(await call("approve",current.pass_id));}catch(e){show({result:"error",message:"Network error. Try again."});}
+};
+$("again").onclick=()=>{
+  $("res").style.display="none";current=null;busy=false;
+  try{scanner.resume();}catch(e){start();}
+};
+function start(){
+  scanner=new Html5Qrcode("reader");
+  scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:240,height:240}},onScan,()=>{})
+    .catch(e=>show({result:"error",message:"Camera unavailable: "+e}));
+}
+start();
+</script></body></html>
