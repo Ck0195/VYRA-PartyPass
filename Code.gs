@@ -1,137 +1,111 @@
-/**
- * VYRA PartyPass backend (Google Apps Script)
- * Routes (all GET, JSON):
- *   ?action=generate&name=..&type=..   -> generatePass()
- *   ?action=check&pass_id=PASS-XXXXXXXX
- *   ?action=approve&pass_id=PASS-XXXXXXXX
- */
-const SPREADSHEET_ID = "1BYdbK0VjR-RfzMg6PyUda-H0HyE-camtus4lopLVFbQ";
-const BACKGROUND_FILE_ID = "1ZiXsjkVLeZBncyDKpsvhoawx_TinVsQ9";
+const SPREADSHEET_ID = "1Td2IZQiZiRHwptywxUAeES8cljTH-6i4eFoNrFmmdLY";
 const SHEET_NAME = "Guests";
-const PASS_TYPES = ["Regular", "Early Bird", "Couple", "Surge Pass"];
+
+const PASS_TYPES = [
+  "Regular",
+  "Early Bird",
+  "Couple",
+  "Surge Pass",
+  "Guest List",
+  "Organizers"
+];
 
 function doGet(e) {
-  const p = (e && e.parameter) || {};
-  const action = String(p.action || "").toLowerCase();
-  try {
-    if (action === "check") return json_(checkPass_(p.pass_id));
-    if (action === "approve") return json_(approvePass_(p.pass_id));
-    if (action === "generate") return json_(generatePass(p.name, p.type));
-    return ContentService.createTextOutput("VYRA PartyPass backend is running.");
-  } catch (err) {
-    return json_({ ok: false, result: "error", message: String(err && err.message || err) });
-  }
+  const action = e.parameter.action || "";
+
+  if (action === "generate") return generatePass_(e);
+  if (action === "check")    return checkPass_(e);
+  if (action === "approve")  return approvePass_(e);
+
+  return json_({ ok: false, message: "Invalid action." });
 }
 
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+function generatePass_(e) {
+  const name = (e.parameter.name || "").trim();
+  const type = (e.parameter.type || "").trim();
+
+  if (!name) return json_({ ok: false, message: "Guest name is required." });
+  if (!PASS_TYPES.includes(type)) return json_({ ok: false, message: "Invalid pass type." });
+
+  const sheet = getSheet_();
+
+  let passId;
+  do {
+    passId = "VYRA-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+  } while (findRow_(sheet, passId) !== -1);
+
+  sheet.appendRow([passId, name, type, passId, "Not Used", new Date()]);
+
+  return json_({
+    ok: true,
+    pass_id: passId,
+    guest_name: name,
+    pass_type: type,
+    qr_data: passId
+  });
 }
 
-function getGuestsSheet_() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  let sh = ss.getSheetByName(SHEET_NAME);
-  if (!sh) sh = ss.insertSheet(SHEET_NAME);
-  if (sh.getLastRow() === 0) {
-    sh.appendRow(["Pass ID", "Guest Name", "Pass Type", "QR / Pass ID", "Status", "Created At"]);
-  }
-  return sh;
+function checkPass_(e) {
+  const id = normalizeId_(e.parameter.id || "");
+  if (!id) return json_({ ok: false, message: "Pass ID is required." });
+
+  const sheet = getSheet_();
+  const row = findRow_(sheet, id);
+
+  if (row === -1) return json_({ ok: true, valid: false, message: "Invalid pass." });
+
+  const v = sheet.getRange(row, 1, 1, 6).getValues()[0];
+
+  return json_({
+    ok: true,
+    valid: true,
+    pass_id: v[0],
+    guest_name: v[1],
+    pass_type: v[2],
+    status: v[4]
+  });
 }
 
-// Uppercase, trim, and collapse any repeated PASS- prefix into exactly one.
+function approvePass_(e) {
+  const id = normalizeId_(e.parameter.id || "");
+  if (!id) return json_({ ok: false, message: "Pass ID is required." });
+
+  const sheet = getSheet_();
+  const row = findRow_(sheet, id);
+
+  if (row === -1) return json_({ ok: false, message: "Pass not found." });
+
+  sheet.getRange(row, 5).setValue("Used");
+
+  return json_({ ok: true, message: "Pass approved.", pass_id: id });
+}
+
 function normalizeId_(id) {
-  let s = String(id || "").trim().toUpperCase();
-  if (!s) return "";
-  s = s.replace(/^(PASS-)+/, "");
-  return "PASS-" + s;
+  return String(id).trim().toUpperCase();
 }
 
-// Returns the 1-based sheet row for a pass ID, or -1 (header row excluded).
-function findPassRow_(sheet, passId) {
-  const last = sheet.getLastRow();
-  if (last < 2) return -1;
-  const ids = sheet.getRange(2, 1, last - 1, 1).getValues();
+function findRow_(sheet, passId) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const target = normalizeId_(passId);
+
   for (let i = 0; i < ids.length; i++) {
-    if (normalizeId_(ids[i][0]) === passId) return i + 2;
+    if (normalizeId_(ids[i][0]) === target) return i + 2;
   }
   return -1;
 }
 
-function checkPass_(rawId) {
-  const passId = normalizeId_(rawId);
-  if (!/^PASS-[A-Z0-9]{8}$/.test(passId)) {
-    return { result: "invalid", message: "This pass is not registered.", pass_id: passId };
-  }
-  const sh = getGuestsSheet_();
-  const row = findPassRow_(sh, passId);
-  if (row < 0) return { result: "invalid", message: "This pass is not registered.", pass_id: passId };
-  const v = sh.getRange(row, 1, 1, 5).getValues()[0];
-  const base = { pass_id: passId, guest_name: String(v[1]), pass_type: String(v[2]) };
-  if (String(v[4]).trim().toLowerCase() === "used") {
-    return Object.assign({ result: "already", message: "This pass has already been checked in." }, base);
-  }
-  return Object.assign({ result: "valid", message: "Valid pass. Entry can be approved." }, base);
+function getSheet_() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
+  return sheet;
 }
 
-function approvePass_(rawId) {
-  const passId = normalizeId_(rawId);
-  if (!/^PASS-[A-Z0-9]{8}$/.test(passId)) {
-    return { result: "invalid", message: "This pass is not registered.", pass_id: passId };
-  }
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
-    const sh = getGuestsSheet_();
-    const row = findPassRow_(sh, passId);
-    if (row < 0) return { result: "invalid", message: "This pass is not registered.", pass_id: passId };
-    const v = sh.getRange(row, 1, 1, 5).getValues()[0];
-    const base = { pass_id: passId, guest_name: String(v[1]), pass_type: String(v[2]) };
-    if (String(v[4]).trim().toLowerCase() === "used") {
-      return Object.assign({ result: "already", message: "This pass has already been checked in." }, base);
-    }
-    sh.getRange(row, 5).setValue("Used");
-    SpreadsheetApp.flush();
-    return Object.assign({ result: "approved", message: "Entry approved." }, base);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function generatePass(name, passType) {
-  // Validate
-  let guest = String(name || "").replace(/\s+/g, " ").trim();
-  if (!guest) return { ok: false, message: "Guest name is required." };
-  if (guest.length > 60) return { ok: false, message: "Guest name is too long (max 60)." };
-  guest = guest.replace(/^[=+\-@]+/, ""); // prevent sheet formula injection
-  if (!guest) return { ok: false, message: "Enter a valid guest name." };
-  const type = PASS_TYPES.filter(function (t) { return t.toLowerCase() === String(passType || "").trim().toLowerCase(); })[0];
-  if (!type) return { ok: false, message: "Invalid pass type." };
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  let passId;
-  try {
-    const sh = getGuestsSheet_();
-    do {
-      passId = "PASS-" + Utilities.getUuid().replace(/-/g, "").substring(0, 8).toUpperCase();
-    } while (findPassRow_(sh, passId) > 0);
-    sh.appendRow([passId, guest, type, passId, "Not Used", new Date()]);
-    SpreadsheetApp.flush();
-  } finally {
-    lock.releaseLock();
-  }
-
-  // QR contains ONLY the pass ID
-  const qrBlob = UrlFetchApp.fetch(
-    "https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=0&format=png&data=" + encodeURIComponent(passId)
-  ).getBlob();
-  const qr = "data:image/png;base64," + Utilities.base64Encode(qrBlob.getBytes());
-
-  let background = "";
-  try {
-    const bg = DriveApp.getFileById(BACKGROUND_FILE_ID).getBlob();
-    background = "data:" + bg.getContentType() + ";base64," + Utilities.base64Encode(bg.getBytes());
-  } catch (err) { /* ticket still renders with default backdrop */ }
-
-  return { ok: true, pass_id: passId, guest_name: guest, pass_type: type, qr: qr, background: background };
+function json_(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }
