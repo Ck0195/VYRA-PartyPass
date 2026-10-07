@@ -393,9 +393,14 @@ $("pr").onclick = () => {
     <head>
       <title>${lastPass.pass_id || "VYRA Pass"}</title>
       <style>
-        body{margin:0;padding:20px;text-align:center;background:#fff}
-        img{width:100%;max-width:520px}
-        @media print{ body{padding:0} img{max-width:100%} }
+        @page{size:A4 portrait;margin:0}
+        html,body{margin:0;padding:0;background:#fff}
+        body{display:flex;justify-content:center;align-items:center;min-height:100vh}
+        img{display:block;width:auto;height:auto;max-width:92vw;max-height:96vh;object-fit:contain;page-break-inside:avoid}
+        @media print{
+          html,body{width:210mm;height:296mm;min-height:0;overflow:hidden}
+          img{max-width:190mm;max-height:285mm}
+        }
       </style>
     </head>
     <body>
